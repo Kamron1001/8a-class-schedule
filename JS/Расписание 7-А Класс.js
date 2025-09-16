@@ -192,6 +192,11 @@ function showDay() {
 
 showDay();
 
+<<<<<<< HEAD
+=======
+
+=======
+>>>>>>> a0585c1c3ddb53b41906c12a0ba18a79b6653a50
 const navMenu = document.getElementById('nav-menu'),
       navToggle = document.getElementById('nav-toggle'),
       navClose = document.getElementById('nav-close');
