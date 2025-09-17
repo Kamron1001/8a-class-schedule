@@ -10,11 +10,9 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 let recognition = null;
 let lastAnswer = "";
 
-// флаг: если true — после ответа автоматически снова слушаем (позволяет задать следующий вопрос)
+// флаг: если true — после ответа автоматически снова слушаем
 let shouldAutoRestart = false;
-// id таймаута авто-стопа прослушивания
 let recognitionTimeoutId = null;
-// длительность прослушивания в миллисекундах (был 5000, увеличил на +2s по просьбе)
 const LISTEN_DURATION = 7000;
 
 // варианты имени активации
@@ -53,7 +51,6 @@ function fuzzyEqual(a,b,thresh=2){
   const d = levenshtein(a,b);
   return d <= thresh;
 }
-// Проверка: содержит ли текст хотя бы одно из слов (fuzzy по-словам)
 function containsWordFuzzy(text, words){
   if(!text || !words) return false;
   const t = normalizeText(text);
@@ -73,10 +70,10 @@ function containsWordFuzzy(text, words){
 const schedule = {
   "понедельник": ["Час Будущего","Китайский язык","Алгебра","Технология","География","Узбекский язык"],
   "вторник": ["Физкультура","Китайский язык","Геометрия","Химия","Черчение"],
-  "среда": ["Русский язык","История","Информатика","Госправо","Физкультура"],
-  "четверг": ["Биология","Китайский язык","Физика","Химия","История","Узбекский язык"],
+  "среда": ["Русский язык","История Узбекистана","Информатика","Алгебра", "Основы Государства", "Физкультура"],
+  "четверг": ["Биология","Китайский язык","Физика","Химия","Всемирная история","Узбекский язык"],
   "пятница": ["Алгебра","Биология","Узбекский язык","Геометрия","Литература","Воспитание"],
-  "суббота": ["Русский язык","История","Литература","География","Физика"],
+  "суббота": ["Русский язык","История Узбекистана","Литература","География","Физика"],
   "воскресенье": ["Выходной"]
 };
 
@@ -95,7 +92,23 @@ function getLessonsText(day){
   return arr ? arr.join(", ") : null;
 }
 
-// Поиск предмета по расписанию — возвращает массив строк вида "понедельник — 2 урок"
+// ======= Числительные (грамотная форма) =======
+function fixLessonText(text) {
+  if (!text) return text;
+  return text
+    .replace(/1 урок/gi, "первый урок")
+    .replace(/2 урок/gi, "второй урок")
+    .replace(/3 урок/gi, "третий урок")
+    .replace(/4 урок/gi, "четвёртый урок")
+    .replace(/5 урок/gi, "пятый урок")
+    .replace(/6 урок/gi, "шестой урок")
+    .replace(/7 урок/gi, "седьмой урок")
+    .replace(/8 урок/gi, "восьмой урок")
+    .replace(/9 урок/gi, "девятый урок")
+    .replace(/10 урок/gi, "десятый урок");
+}
+
+// ======= Поиск предметов =======
 function findSubject(subject){
   const normSubj = normalizeText(subject);
   const found = [];
@@ -128,34 +141,30 @@ pickVoice();
 
 function speak(text, opts = {}) {
   if(!text) return;
+  text = fixLessonText(text); // исправление числительных
   lastAnswer = text;
   try { if(synth.speaking) synth.cancel(); } catch(e){}
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ru-RU";
   if(preferredVoice) u.voice = preferredVoice;
-  u.rate = typeof opts.rate === "number" ? opts.rate : 1.02;   // чуть живее
-  u.pitch = typeof opts.pitch === "number" ? opts.pitch : 1.05;
+  u.rate = typeof opts.rate === "number" ? opts.rate : 0.97;   // медленнее, мягче
+  u.pitch = typeof opts.pitch === "number" ? opts.pitch : 1.2; // выше, нежнее
   u.volume = typeof opts.volume === "number" ? opts.volume : 1;
 
-  // Когда Нова закончит говорить — если нужно, автоматически снова слушаем
   u.onend = () => {
-    // показываем последний ответ в интерфейсе
     if(todayEl) todayEl.textContent = lastAnswer;
-
     if(shouldAutoRestart){
-      // даём короткую паузу перед повторным прослушиванием
       setTimeout(()=>{
         try {
           if(recognition){
             recognition.start();
-            // ставим ограничитель прослушивания
             clearTimeout(recognitionTimeoutId);
             recognitionTimeoutId = setTimeout(()=>{
               try{ recognition.stop(); }catch(e){}
             }, LISTEN_DURATION);
           }
         } catch(e){}
-      }, 300); // пауза 300ms чтобы микрофон/двойные события не конфликтовали
+      }, 300);
     }
   };
 
@@ -163,12 +172,12 @@ function speak(text, opts = {}) {
   if(todayEl) todayEl.textContent = text;
 }
 
-// ======= Основной парсер команд (приоритеты исправлены) =======
+// ======= Основной парсер =======
 function handleCommand(rawText, invokedByButton = false){
   if(!rawText) return;
   let text = normalizeText(rawText);
 
-  // убираем имя активации, если сказали
+  // убираем имя активации
   for(const n of wakeNames){
     const re = new RegExp("\\b"+n+"\\b","i");
     if(re.test(text)){
@@ -178,25 +187,22 @@ function handleCommand(rawText, invokedByButton = false){
   }
 
   if(text.length === 0){
-    speak("Я слушаю.");
+    speak("Я слушаю тебя.");
     return;
   }
 
-  // ключевые наборы слов
   const lessonWords = ["урок","уроки","расписани","занятие","предмет","предметы"];
   const timeWords = ["время","который час","час"];
   const dateWords = ["дата","число","сегодня","день"];
   const tomorrowWords = ["завтра","завтраш"];
   const whenWords = ["когда","в какие","в какие дни","какой день","где","на какой паре","который урок"];
 
-  // если явно спрашивают время
   if(containsWordFuzzy(text, timeWords)){
     const now = new Date();
     speak(`Сейчас ${now.getHours()} часов ${now.getMinutes()} минут.`);
     return;
   }
 
-  // если явно спрашивают дату
   if(containsWordFuzzy(text, dateWords) && !containsWordFuzzy(text, lessonWords)){
     const now = new Date();
     const months = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
@@ -204,8 +210,6 @@ function handleCommand(rawText, invokedByButton = false){
     return;
   }
 
-  // Сначала проверяем — пользователь спрашивает про конкретный предмет (когда/в какие дни)
-  // Спектр возможных предметов (можешь дополнять)
   const subjects = [
     "алгебра","геометрия","химия","физика","биология","литература","история",
     "русский","узбекский","китайский","информатика","физкультура","черчение",
@@ -213,17 +217,15 @@ function handleCommand(rawText, invokedByButton = false){
   ];
   for(const subj of subjects){
     if(containsWordFuzzy(text, [subj])){
-      // если в запросе есть слова "когда/в какие", то ответим расписанием предмета
-      if(containsWordFuzzy(text, whenWords) || containsWordFuzzy(text, ["когда","в какие","когда у нас"])){
+      if(containsWordFuzzy(text, whenWords)){
         const found = findSubject(subj);
         if(found.length > 0){
-          speak(`${capitalize(subj)} проходит: ${found.join("; ")}.`);
+          speak(`${capitalize(subj)} проводится: ${found.join("; ")}.`);
         } else {
           speak(`Я не нашла ${subj} в расписании.`);
         }
         return;
       }
-      // Иначе: если пользователь просто сказал предмет (например "алгебра"), тоже покажем где он есть
       const found = findSubject(subj);
       if(found.length > 0){
         speak(`${capitalize(subj)}: ${found.join("; ")}.`);
@@ -234,17 +236,14 @@ function handleCommand(rawText, invokedByButton = false){
     }
   }
 
-  // Теперь — запросы про расписание/уроки с указанием "завтра / сегодня / день недели"
-  // 1) если есть и "уроки" и "завтра" -> завтра
   if(containsWordFuzzy(text, lessonWords) && containsWordFuzzy(text, tomorrowWords)){
     const d = getDayName(1);
     const lessons = getLessonsText(d);
-    if(lessons) speak(`Завтра (${d}): ${lessons}.`);
+    if(lessons) speak(`Завтра, в ${d}: ${lessons}.`);
     else speak(`Нет данных на ${d}.`);
     return;
   }
 
-  // 2) если есть "уроки" + указание конкретного дня (например "в пятницу" / "в пятницу какие уроки")
   for(const dayKey of Object.keys(schedule)){
     if(containsWordFuzzy(text, [dayKey]) && containsWordFuzzy(text, lessonWords)){
       const lessons = getLessonsText(dayKey);
@@ -254,25 +253,22 @@ function handleCommand(rawText, invokedByButton = false){
     }
   }
 
-  // 3) если есть "уроки" + "сегодня" -> сегодня
   if(containsWordFuzzy(text, lessonWords) && containsWordFuzzy(text, ["сегодня","сегодняшн","что сегодня"])){
     const d = getDayName(0);
     const lessons = getLessonsText(d);
-    if(lessons) speak(`Сегодня (${d}): ${lessons}.`);
+    if(lessons) speak(`Сегодня, ${d}: ${lessons}.`);
     else speak(`Нет данных на ${d}.`);
     return;
   }
 
-  // 4) если сказали просто "уроки" без дня — по умолчанию показываем сегодня
   if(containsWordFuzzy(text, lessonWords)){
     const d = getDayName(0);
     const lessons = getLessonsText(d);
-    if(lessons) speak(`Сегодня (${d}): ${lessons}.`);
+    if(lessons) speak(`Сегодня, ${d}: ${lessons}.`);
     else speak("Не могу найти расписание.");
     return;
   }
 
-  // 5) открыть секцию (если есть слова типа "открой/покажи" + день)
   if(containsWordFuzzy(text, ["открой","покажи","перейди","показать"]) ){
     for(const dayKey of Object.keys(schedule)){
       if(containsWordFuzzy(text, [dayKey])){
@@ -302,17 +298,15 @@ function handleCommand(rawText, invokedByButton = false){
     return;
   }
 
-  // fallback
-  speak("Извини, не поняла. Спроси: «Нова, какие уроки завтра?» или «Нова, когда алгебра?»");
+  speak("Извини, я не совсем поняла. Попробуй спросить, например: «Нова, какие уроки завтра?» или «Нова, когда алгебра?»");
 }
 
-// вспомогательные
 function capitalize(s){ if(!s) return s; return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // ======= SpeechRecognition =======
 function initRecognition(){
   if(!SpeechRecognition){
-    alert("Ваш браузер не поддерживает Web Speech API. Откройте сайт в Chrome/Яндекс.");
+    alert("Ваш браузер не поддерживает Web Speech API. Попробуйте Chrome или Яндекс.");
     return;
   }
   recognition = new SpeechRecognition();
@@ -326,29 +320,21 @@ function initRecognition(){
   };
 
   recognition.onresult = (ev) => {
-    // получаем последний распознанный фрагмент
     const text = ev.results[ev.results.length-1][0].transcript;
     console.log("Распознано:", text);
-    // остановим авто-стоп (мы уже получили результат)
     clearTimeout(recognitionTimeoutId);
-    // Обработаем команду. Ставим shouldAutoRestart = true чтобы после ответа снова слушать
-    // (если пользователь нажал кнопку — оставляем авто-повтор включённым)
     handleCommand(text, true);
   };
 
   recognition.onerror = (err) => {
     console.warn("SpeechRecognition error:", err);
-    // показываем ошибку пользователю устно и в поле
     speak("Ошибка распознавания речи. Проверь доступ к микрофону.");
     clearTimeout(recognitionTimeoutId);
   };
 
   recognition.onend = () => {
-    // завершение распознавания (обычно сразу после результата или по таймауту)
     if(jarvisBtn) jarvisBtn.classList.remove("listening");
-    // если не было речи (просто таймаут) — обновим UI
     if(todayEl && lastAnswer) todayEl.textContent = lastAnswer;
-    // НЕ делаем автоперезапуска здесь — перезапуск выполняется в speak.onend
   };
 }
 
@@ -362,7 +348,6 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   jarvisBtn.addEventListener("click", () => {
-    // переключатель: если уже слушаем — остановить и выключить автоперезапуск
     if(jarvisBtn.classList.contains("listening")){
       shouldAutoRestart = false;
       try { recognition.stop(); } catch(e){}
@@ -371,17 +356,14 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    // стартуем прослушивание и включаем авто-перезапуск (чтобы после ответа можно было задать следующий вопрос)
     shouldAutoRestart = true;
     try{
       recognition.start();
-      // ставим ограничитель прослушивания
       clearTimeout(recognitionTimeoutId);
       recognitionTimeoutId = setTimeout(()=>{
         try{ recognition.stop(); }catch(e){}
       }, LISTEN_DURATION);
     }catch(e){
-      // на редких браузерах нужно пересоздать recognition
       initRecognition();
       try{
         recognition.start();
@@ -392,9 +374,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }catch(err){}
     }
   });
-
-  // подсказка в UI (не голосом) — можно убрать
-  // todayEl.textContent = "Нажми микрофон и спроси: Нова, какие уроки завтра?";
 });
 
   // ТЕМЫ
